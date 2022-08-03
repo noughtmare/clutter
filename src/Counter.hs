@@ -6,7 +6,7 @@
 
 -- TODO: resize
 
-module Counter (Counter, new, count, toList) where
+module Counter where -- (Counter, new, count, toList) where
 
 import Control.Monad.Primitive (PrimMonad (PrimState), RealWorld, touch)
 import Data.Bits (Bits (unsafeShiftL, unsafeShiftR))
@@ -47,8 +47,7 @@ count (MkCounter c t) k = do
   if
       -- slot is empty
       | slot == (nullPtr :: Ptr k) -> do
-        compactAdd c k
-        p <- anyToPtr k
+        p <- anyToPtr . getCompact =<< compactAdd c k
         writeByteArray t i p
         writeByteArray t (i + 1) (1 :: Int)
       -- slot is filled
@@ -66,8 +65,7 @@ count (MkCounter c t) k = do
       if
           -- slot is empty
           | slot == nullPtr -> do
-            compactAdd c k
-            p <- anyToPtr k
+            p <- anyToPtr . getCompact =<< compactAdd c k
             writeByteArray t i p
             writeByteArray t (i + 1) (1 :: Int)
           -- slot is filled
@@ -84,7 +82,7 @@ toList (MkCounter c t) =
   let n = sizeofMutableByteArray t `quot` sizeOf (nullPtr :: Ptr k)
       go :: [(k, Int)] -> Int -> IO [(k, Int)]
       go s !i
-        | i == n = traceIO "end" *> pure s
+        | i == n = pure s
         | otherwise = do
           hFlush stdout
           slot <- readByteArray t i
@@ -92,17 +90,7 @@ toList (MkCounter c t) =
             then do
               go s (i + 2)
             else do
-              traceIO "ptrToAny"
-              hFlush stdout
-              let k = ptrToAny slot
-              traceIO "done:"
-              hFlush stdout
-              traceIO (show k)
-              traceIO "toList read count"
-              hFlush stdout
+              let !k = ptrToAny slot
               !v <- readByteArray t (i + 1)
-              traceIO "done:"
-              hFlush stdout
-              traceIO (show (k, v))
               go ((k, v) : s) (i + 2)
-   in go [] 0 <* touch (c, t)
+   in go [] 0 -- <* touch c
