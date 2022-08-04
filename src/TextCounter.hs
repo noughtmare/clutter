@@ -1,32 +1,29 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE BangPatterns #-}
-module TextCounter (TextCounter, new, count, toList) where
+module TextCounter (TextCounter, new, count, toList, debugPopulation) where
 
 import qualified Counter as L
 import qualified IntCounter as S
 import Data.Text.Internal ( Text(..) )
 import qualified Data.Text.Array as A
-import Data.Bits ( Bits(unsafeShiftL) )
-import GHC.Exts (sizeofByteArray#, Int (I#))
+import Data.Bits ( Bits(unsafeShiftL, (.&.)) )
+import GHC.Exts hiding (toList)
 import Data.Bifunctor (first)
 import Data.Word ( Word8 )
 import Control.Monad.ST ( runST )
 import Data.Foldable (for_)
 import qualified Data.Text.Short as Short
 
-data TextCounter = MkTextCounter !(L.Counter Short.ShortText) !S.IntCounter
+data TextCounter = MkTextCounter !S.IntCounter !(L.Counter Short.ShortText)
 
-new :: Int -> IO TextCounter
-new n = do
+new :: Int -> Int -> IO TextCounter
+new n m = do
   s <- S.new n
-  l <- L.new n
-  pure (MkTextCounter l s)
+  l <- L.new m
+  pure (MkTextCounter s l)
 
 encode :: Text -> Int
-encode (Text a@(A.ByteArray ba) j n) = go 0 0 where
-  go !s !i
-    | i == n = s
-    | otherwise = go (fromIntegral (A.unsafeIndex a (j + i)) + s `unsafeShiftL` 8) (i + 1)
+encode (Text a@(A.ByteArray ba) (I# j) n) = I# (indexIntArray# ba j) .&. (unsafeShiftL 1 (n - 1) - 1)
 
 decode :: Int -> Text
 decode n = myPack $ takeWhile (/= 0) $ go n where
@@ -41,12 +38,19 @@ myPack xs = runST $ do
   pure (Text a 0 n)
 
 count :: TextCounter -> Text -> IO ()
-count (MkTextCounter large small) t@(Text a@(A.ByteArray ba) i n)
-  | n <= 8 = S.count small (encode t)
-  | otherwise = L.count large (Short.fromText t)
+count (MkTextCounter s l) t@(Text a@(A.ByteArray ba) i n)
+  | n <= 8 = S.count s (encode t)
+  | otherwise = L.count l (Short.fromText t)
+{-# INLINE count #-}
 
 toList :: TextCounter -> IO [(Text,Int)]
-toList (MkTextCounter l s) = do
-  xs <- map (first Short.toText) <$> L.toList l
-  ys <- map (first decode) <$> S.toList s
+toList (MkTextCounter s l) = do
+  xs <- map (first decode) <$> S.toList s
+  ys <- map (first Short.toText) <$> L.toList l
   pure (xs ++ ys)
+
+debugPopulation :: TextCounter -> IO (Int, Int)
+debugPopulation (MkTextCounter s l) = do
+  xs <- S.toList s
+  ys <- L.toList l
+  return (length xs, length ys)

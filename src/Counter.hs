@@ -3,6 +3,8 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DataKinds #-}
 
 -- TODO: resize
 
@@ -23,14 +25,19 @@ import Unsafe.Coerce (unsafeCoerce)
 import Prelude hiding (lookup)
 import Data.List (sortOn)
 import System.IO
+import Data.Primitive.Types (Prim)
 
 data Counter k = MkCounter !(Compact ()) !(MutableByteArray RealWorld)
 
-anyToPtr :: a -> IO (Ptr a)
-anyToPtr !x = IO (\s -> case anyToAddr# x s of (# s, a #) -> (# s, Ptr a #))
+newtype CompactPtr a = MkCompactPtr (Ptr a) deriving (Prim, Eq)
 
-ptrToAny :: Ptr a -> a
-ptrToAny (Ptr a) = case addrToAny# a of (# x #) -> x
+anyToCompactPtr :: Compact b -> a -> IO (CompactPtr a)
+anyToCompactPtr c !x = do
+  x <- getCompact <$> compactAdd c x
+  IO (\s -> case anyToAddr# x s of (# s, a #) -> (# s, MkCompactPtr (Ptr a) #))
+
+compactPtrToAny :: CompactPtr a -> a
+compactPtrToAny (MkCompactPtr (Ptr a)) = case addrToAny# a of (# x #) -> x
 
 new :: forall k. Int -> IO (Counter k)
 new n = do
@@ -46,12 +53,12 @@ count (MkCounter c t) k = do
   slot <- readByteArray t i
   if
       -- slot is empty
-      | slot == (nullPtr :: Ptr k) -> do
-        p <- anyToPtr . getCompact =<< compactAdd c k
+      | slot == MkCompactPtr nullPtr -> do
+        p <- anyToCompactPtr c k
         writeByteArray t i p
         writeByteArray t (i + 1) (1 :: Int)
       -- slot is filled
-      | ptrToAny slot == k -> do
+      | compactPtrToAny slot == k -> do
         v <- readByteArray t (i + 1)
         writeByteArray t (i + 1) (v + 1 :: Int)
       -- wrong slot
@@ -64,12 +71,12 @@ count (MkCounter c t) k = do
       slot <- readByteArray t i
       if
           -- slot is empty
-          | slot == nullPtr -> do
-            p <- anyToPtr . getCompact =<< compactAdd c k
+          | slot == MkCompactPtr nullPtr -> do
+            p <- anyToCompactPtr c k
             writeByteArray t i p
             writeByteArray t (i + 1) (1 :: Int)
           -- slot is filled
-          | ptrToAny slot == k -> do
+          | compactPtrToAny slot == k -> do
             v <- readByteArray t (i + 1)
             writeByteArray t (i + 1) (v + 1 :: Int)
           -- wrong slot
@@ -86,11 +93,11 @@ toList (MkCounter c t) =
         | otherwise = do
           hFlush stdout
           slot <- readByteArray t i
-          if slot == nullPtr
+          if slot == MkCompactPtr nullPtr
             then do
               go s (i + 2)
             else do
-              let !k = ptrToAny slot
+              let !k = compactPtrToAny slot
               !v <- readByteArray t (i + 1)
               go ((k, v) : s) (i + 2)
    in go [] 0 -- <* touch c
