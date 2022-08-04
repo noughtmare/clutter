@@ -33,7 +33,7 @@ newtype CompactPtr a = MkCompactPtr (Ptr a) deriving (Prim, Eq)
 
 anyToCompactPtr :: Compact b -> a -> IO (CompactPtr a)
 anyToCompactPtr c !x = do
-  x <- getCompact <$> compactAdd c x
+  !x <- getCompact <$> compactAdd c x
   IO (\s -> case anyToAddr# x s of (# s, a #) -> (# s, MkCompactPtr (Ptr a) #))
 
 compactPtrToAny :: CompactPtr a -> a
@@ -91,7 +91,6 @@ toList (MkCounter c t) =
       go s !i
         | i == n = pure s
         | otherwise = do
-          hFlush stdout
           slot <- readByteArray t i
           if slot == MkCompactPtr nullPtr
             then do
@@ -100,4 +99,4 @@ toList (MkCounter c t) =
               let !k = compactPtrToAny slot
               !v <- readByteArray t (i + 1)
               go ((k, v) : s) (i + 2)
-   in go [] 0 -- <* touch c
+   in go [] 0 <* touch c
