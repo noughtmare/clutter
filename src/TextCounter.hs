@@ -25,7 +25,7 @@ new n m = do
 
 encode :: Text -> Int
 encode txt@(Text a@(A.ByteArray ba) (I# j) n) =
-  fromIntegral (W# (indexWord8ArrayAsWord# ba j) .&. unsafeShiftL 1 (8 * n) - 1)
+  fromIntegral (W# (indexWord8ArrayAsWord# ba j) .&. (unsafeShiftL 1 (8 * n) - 1))
 
 decode :: Int -> Text
 decode n = myPack $ takeWhile (/= 0) $ go n
