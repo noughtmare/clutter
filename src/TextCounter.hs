@@ -12,7 +12,7 @@ import qualified Data.Text.Array as A
 import Data.Text.Internal (Text (..))
 import qualified Data.Text.Short as Short
 import Data.Word (Word8)
-import GHC.Exts (Int (I#), Word (W#), indexWord8ArrayAsWord#)
+import GHC.Exts (Int (I#), Word (W#), indexWord8ArrayAsWord#, indexWord8ArrayAsInt#)
 import qualified IntCounter as S
 
 data TextCounter = MkTextCounter !S.IntCounter !(L.Counter Short.ShortText)
@@ -24,11 +24,12 @@ new n m = do
   pure (MkTextCounter s l)
 
 encode :: Text -> Int
-encode txt@(Text a@(A.ByteArray ba) (I# j) n) =
+encode (Text (A.ByteArray ba) (I# j) 8) = I# (indexWord8ArrayAsInt# ba j)
+encode (Text (A.ByteArray ba) (I# j) n) =
   fromIntegral (W# (indexWord8ArrayAsWord# ba j) .&. (unsafeShiftL 1 (8 * n) - 1))
 
 decode :: Int -> Text
-decode n = myPack $ takeWhile (/= 0) $ go n
+decode n0 = myPack $ takeWhile (/= 0) $ go n0
   where
     go n = let (q, r) = quotRem n 0x100 in fromIntegral r : go q
 
@@ -41,8 +42,7 @@ myPack xs = runST $ do
   pure (Text a 0 n)
 
 count :: TextCounter -> Text -> IO ()
-count (MkTextCounter s l) t@(Text a@(A.ByteArray ba) i n)
-  --   | traceShow (i, n) False = undefined
+count (MkTextCounter s l) t@(Text _ _ n)
   | n <= 8 = S.count s (encode t)
   | otherwise = L.count l (Short.fromText t)
 {-# INLINE count #-}
